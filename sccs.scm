@@ -34,7 +34,7 @@
 (define multi-char-operator
   '(
     <<= >>= ... == != <= >= -> ++ -- <<
-    >>  +=  -=  *= /= && |\|\|| &= |\|=| ^=
+    >>  +=  -=  *= /= && \|\| &= \|= ^=
     ))
 
 (define integer-prefix '(0x 0b))
@@ -75,13 +75,15 @@
           (and (let match ([idx 0])
                  (if (= idx n)
                    #t
-                   (let ([ch (peek-char port)])
-                     (and (not (eof-object? ch))
-                          (if (char=? ch (string-ref symbol-string idx))
-                            (begin (read-char port)
-                                   (match (+ idx 1)))
-                            (begin (unget-string port symbol-string 0 (- idx 1))
-                                   #f))))))
+                   (let ([ch (peek-char port)]) 
+                     (if (and (not (eof-object? ch))
+                              (char=? ch (string-ref symbol-string idx)))
+                       ;;; if match succeeded, eat a char from port and match next
+                       (begin (read-char port)
+                              (match (+ idx 1)))
+                       ;;; if match failed, recover the port to initial state and return #f
+                       (begin (unget-string port symbol-string 0 (- idx 1))
+                              #f)))))
                symbol)))
       symbols*)))
 
@@ -93,33 +95,57 @@
   (lambda (port)
     (match-symbol port multi-char-operator)))
 
-(define read-integer-literal
+(define read-integer-value
   (lambda (port)
     (let ([ch (peek-char port)])
-      (when (eof-object? ch) (assertion-violation 'read-integer-literal "given port has reached eof" port))
+      (when (eof-object? ch)
+        (assertion-violation 'read-integer-literal
+                             "given port has reached eof"
+                             port))
       (and (char-numeric? ch) 
-           (let* ([sym (match-symbol port integer-prefix)]
-                  [ch (peek-char port)])
-             (if (eof-object? ch)
-               (error 'read-integer-literal "unexpected eof after integer literal prefix" (symbol->string sym))
-               ((lambda (base)
-                  (string->number 
-                    (list->string 
-                      (reverse (let loop ([ls '()]
-                                          [ch (peek-char port)])
-                                 (if (eof-object? ch)
-                                   ls
-                                   (when (or (char-numeric? ch) 
-                                             (char-alphabetic? ch))
-                                     (read-char port)
-                                     (loop (cons ch ls) (peek-char port))))))) 
-                    base))
-                (cond 
-                  [(and (eq? sym '0x) (is-hex-digit? ch)) 16]
-                  [(and (eq? sym '0b) (is-bin-digit? ch)) 2]
-                  [(and (char=? ch #\0) (is-oct-digit? ch)) 8]
-                  [else 10])
-                )))))))
+           (let ([sym (match-symbol port integer-prefix)])
+             ;;; if '0x' or '0b' is followed by an eof mark, raise a exception 
+             (if (eof-object? (peek-char port))
+               (error 'read-integer-literal
+                      "unexpected eof after integer literal prefix" 
+                      (symbol->string sym)) 
+               (let* ([integer-string             
+                        (list->string 
+                          (reverse (let loop ([ls '()]
+                                              [ch (peek-char port)])
+                                     (if (eof-object? ch)
+                                       ls
+                                       (when (or (char-numeric? ch) 
+                                                 (char-alphabetic? ch))
+                                         (read-char port)
+                                         (loop (cons ch ls) (peek-char port))))))) ]
+                      [base (cond 
+                              [(and (eq? sym '0x) (is-hex-digit? ch)) 16]
+                              [(and (eq? sym '0b) (is-bin-digit? ch)) 2]
+                              [(and (char=? ch #\0) (is-oct-digit? ch)) 8]
+                              [else 10])]
+                      [integer (string->number integer-string base)])
+                 ;;; there are 2 cases when integer is #f
+                 ;;; 1) the token is '0'
+                 ;;; 2) the token format is wrong with given prefix '0x' '0b' or '0'
+                 ;;; raise a exception when case 2 happened
+                 (when (and (not (string=? integer-string "")) (not integer))
+                   (error 'read-integer-literal 
+                          "not a valid literal with given prefix"
+                          (case sym 
+                            [#f "0"]
+                            [else (symbol->string sym)])
+                          (case sym
+                            ;;; when the integer prefix is '0', integer-string will includes the prefix
+                            ;;; so here need to get its substring
+                            [#f (substring integer-string 
+                                           1 
+                                           (string-length integer-string))]
+                            [else integer-string])))
+                 ;;; case 1 happened
+                 (if integer
+                   integer
+                   0))))))))
 
 
 (define tokenize
@@ -127,3 +153,4 @@
     (let* ([ip (oepn-file-input-port infn (file-options)
                                      (buffer-mode block) (native-transcoder))])
       (close-port ip))))
+
