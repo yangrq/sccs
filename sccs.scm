@@ -99,26 +99,27 @@
       (when (eof-object? ch) (assertion-violation 'read-integer-literal "given port has reached eof" port))
       (and (char-numeric? ch) 
            (let* ([sym (match-symbol port integer-prefix)]
-                  [base 10]
                   [ch (peek-char port)])
              (if (eof-object? ch)
                (error 'read-integer-literal "unexpected eof after integer literal prefix" (symbol->string sym))
-               (begin 
-                 (cond 
-                   [(and (eq? sym '0x) (is-hex-digit? ch)) (set! base 16)]
-                   [(and (eq? sym '0b) (is-bin-digit? ch)) (set! base 2)]
-                   [(and (char=? ch #\0) (is-oct-digit? ch)) (set! base 8)])
-                 (string->number 
-                   (list->string 
-                     (reverse (let loop ([ls '()]
-                                         [ch (peek-char port)])
-                                (if (eof-object? ch)
-                                  ls
-                                  (when (or (char-numeric? ch) 
-                                            (char-alphabetic? ch))
-                                    (read-char port)
-                                    (loop (cons ch ls) (peek-char port))))))) 
-                   base))))))))
+               ((lambda (base)
+                  (string->number 
+                    (list->string 
+                      (reverse (let loop ([ls '()]
+                                          [ch (peek-char port)])
+                                 (if (eof-object? ch)
+                                   ls
+                                   (when (or (char-numeric? ch) 
+                                             (char-alphabetic? ch))
+                                     (read-char port)
+                                     (loop (cons ch ls) (peek-char port))))))) 
+                    base))
+                (cond 
+                  [(and (eq? sym '0x) (is-hex-digit? ch)) 16]
+                  [(and (eq? sym '0b) (is-bin-digit? ch)) 2]
+                  [(and (char=? ch #\0) (is-oct-digit? ch)) 8]
+                  [else 10])
+                )))))))
 
 
 (define tokenize
